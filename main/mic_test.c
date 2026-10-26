@@ -58,7 +58,6 @@ static inline float apply_speech_filter(float raw, float *dc_x, float *dc_y, flo
 }
 
 static void mic_reader_task(void *pvParameters) {
-    const size_t SAMPLES_COUNT = 256;
     static int32_t raw_buffer[256 * 2]; // Static allocation to protect task stack
     float smoothed_rms = 0.0f;
     float adaptive_noise_floor = 300.0f; // Continuously tracks ambient room noise
