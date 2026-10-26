@@ -66,7 +66,7 @@ void app_main(void) {
         if (audio_ok) {
             st7735_draw_string(8, 42, "[OK] I2S PCM5102A", COLOR_GREEN_OK, COLOR_CARD, 1);
             st7735_draw_string(114, 42, "44.1kHz", COLOR_SLATE, COLOR_CARD, 1);
-            st7735_draw_string(8, 56, "[>] AUDIO OUTPUT ON", COLOR_CYAN, COLOR_CARD, 1);
+            st7735_draw_string(8, 56, "[>] PIN: L1 D2 B3 S4", COLOR_CYAN, COLOR_CARD, 1);
         } else {
             st7735_draw_string(8, 42, "[ERR] PCM5102A FAIL", COLOR_RED, COLOR_CARD, 1);
             st7735_draw_string(8, 56, "Check I2S Connections", COLOR_AMBER, COLOR_CARD, 1);

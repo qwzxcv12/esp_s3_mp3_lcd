@@ -5,10 +5,10 @@
 #include "esp_err.h"
 
 // User's audio pinout for PCM5102A on ESP32-S3-Zero
-#define PIN_I2S_LCK    2  // Word Select / LRCK
-#define PIN_I2S_DIN    3  // Serial Data / DOUT
-#define PIN_I2S_BCK    4  // Bit Clock / BCLK
-#define PIN_I2S_SCK    5  // Master Clock / MCLK
+#define PIN_I2S_LCK    1  // Word Select / LRCK
+#define PIN_I2S_DIN    2  // Serial Data / DOUT
+#define PIN_I2S_BCK    3  // Bit Clock / BCLK
+#define PIN_I2S_SCK    4  // Master Clock / SCK (Pulled to 0V/GND)
 
 #define AUDIO_SAMPLE_RATE 44100
 
