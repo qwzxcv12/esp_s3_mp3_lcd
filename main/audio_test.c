@@ -16,11 +16,11 @@ static bool s_audio_ready = false;
 #endif
 
 esp_err_t audio_test_init(void) {
-    ESP_LOGI(TAG, "Configuring PCM5102A: LCK=%d, DIN=%d, BCK=%d, SCK=%d",
+    ESP_LOGI(TAG, "Configuring PCM5102A (64 BCLK 32-bit frame): LCK=%d, DIN=%d, BCK=%d, SCK=%d",
              PIN_I2S_LCK, PIN_I2S_DIN, PIN_I2S_BCK, PIN_I2S_SCK);
 
-    // 1. Force SCK (GPIO 5) to LOW (0V / GND)
-    // PCM5102A requires SCK tied to GND to activate its internal PLL and auto-generate MCLK from BCK.
+    // 1. Pull SCK (GPIO 5) actively to 0V (GND)
+    // When SCK is tied to GND, PCM5102A's internal PLL generates jitter-free MCLK directly from BCK.
     gpio_config_t sck_conf = {
         .pin_bit_mask = (1ULL << PIN_I2S_SCK),
         .mode = GPIO_MODE_OUTPUT,
@@ -42,11 +42,15 @@ esp_err_t audio_test_init(void) {
         return ret;
     }
 
-    // 3. Standard Philips I2S mode configuration (44.1kHz, 16-bit Stereo)
-    // PCM5102A expects PHILIPS I2S format (not Left-Justified/MSB)
+    // 3. Configure 32-bit Standard Philips Frame (64 BCLK per frame)
+    // PCM5102A is a native 32-bit DAC requiring a 64-pulse BCK frame for reliable PLL lock.
+    i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
+    slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+    slot_cfg.ws_width = 32;
+
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .slot_cfg = slot_cfg,
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED, // PCM5102A uses internal PLL when SCK is grounded
             .bclk = (gpio_num_t)PIN_I2S_BCK,
@@ -77,7 +81,7 @@ esp_err_t audio_test_init(void) {
     }
 
     s_audio_ready = true;
-    ESP_LOGI(TAG, "PCM5102A I2S driver initialized with Philips standard format!");
+    ESP_LOGI(TAG, "PCM5102A I2S driver running with 32-bit 64-BCK frame!");
     return ESP_OK;
 }
 
@@ -85,13 +89,13 @@ bool audio_is_ready(void) {
     return s_audio_ready;
 }
 
-// Generate and output a clean sine wave
+// Generate and output a clean 32-bit sine wave
 static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) {
     if (!s_audio_ready || tx_handle == NULL) return;
 
     size_t total_samples = (AUDIO_SAMPLE_RATE * duration_ms) / 1000;
     const size_t CHUNK_SIZE = 256;
-    int16_t buffer[CHUNK_SIZE * 2]; // Stereo: Left & Right
+    int32_t buffer[CHUNK_SIZE * 2]; // 32-bit Stereo: Left & Right
 
     size_t samples_generated = 0;
     while (samples_generated < total_samples) {
@@ -110,15 +114,16 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
                 envelope = remain_ms / 20.0f;
             }
 
-            float sample_val = sinf(2.0f * M_PI * freq_hz * t) * envelope * max_amplitude * 32000.0f;
-            int16_t pcm = (int16_t)sample_val;
+            // 32-bit PCM full scale: -2147483648 to 2147483647
+            float sample_val = sinf(2.0f * M_PI * freq_hz * t) * envelope * max_amplitude * 2147000000.0f;
+            int32_t pcm = (int32_t)sample_val;
 
             buffer[i * 2]     = pcm; // Left channel
             buffer[i * 2 + 1] = pcm; // Right channel
         }
 
         size_t bytes_written = 0;
-        i2s_channel_write(tx_handle, buffer, chunk * sizeof(int16_t) * 2, &bytes_written, pdMS_TO_TICKS(100));
+        i2s_channel_write(tx_handle, buffer, chunk * sizeof(int32_t) * 2, &bytes_written, pdMS_TO_TICKS(100));
         samples_generated += chunk;
     }
 }
@@ -126,11 +131,11 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
 // Play startup melodic chime (C5 -> E5 -> G5 -> C6)
 void audio_play_chime(void) {
     if (!s_audio_ready) return;
-    ESP_LOGI(TAG, "Playing startup sound chime...");
-    play_tone(523.25f, 160, 0.9f); // C5
-    play_tone(659.25f, 160, 0.9f); // E5
-    play_tone(783.99f, 160, 0.9f); // G5
-    play_tone(1046.50f, 400, 0.95f); // C6
+    ESP_LOGI(TAG, "Playing startup sound chime (32-bit)...");
+    play_tone(523.25f, 160, 0.95f); // C5
+    play_tone(659.25f, 160, 0.95f); // E5
+    play_tone(783.99f, 160, 0.95f); // G5
+    play_tone(1046.50f, 400, 1.0f);  // C6
 }
 
 // Provide animated visualizer levels (simulated equalizer)
