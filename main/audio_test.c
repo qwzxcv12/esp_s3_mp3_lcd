@@ -95,7 +95,7 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
 
     size_t total_samples = (AUDIO_SAMPLE_RATE * duration_ms) / 1000;
     const size_t CHUNK_SIZE = 256;
-    int32_t buffer[CHUNK_SIZE * 2]; // 32-bit Stereo: Left & Right
+    static int32_t buffer[256 * 2]; // Static allocation to protect task stack
 
     size_t samples_generated = 0;
     while (samples_generated < total_samples) {

@@ -36,7 +36,7 @@ static inline float dc_block_filter_right(float sample) {
 
 static void mic_reader_task(void *pvParameters) {
     const size_t SAMPLES_COUNT = 256;
-    int32_t raw_buffer[SAMPLES_COUNT * 2]; // Stereo interleaved
+    static int32_t raw_buffer[256 * 2]; // Static allocation to prevent task stack overflow
     float smoothed_rms = 0.0f;
     uint32_t step = 0;
 
@@ -168,8 +168,8 @@ esp_err_t mic_test_init(void) {
     s_mic_ready = true;
     ESP_LOGI(TAG, "INMP441 I2S_NUM_1 driver initialized successfully!");
 
-    // 5. Start background reading task
-    xTaskCreate(mic_reader_task, "mic_reader", 4096, NULL, 4, NULL);
+    // 5. Start background reading task with generous stack
+    xTaskCreate(mic_reader_task, "mic_reader", 6144, NULL, 4, NULL);
 
     return ESP_OK;
 }
