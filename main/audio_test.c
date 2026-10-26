@@ -16,10 +16,22 @@ static bool s_audio_ready = false;
 #endif
 
 esp_err_t audio_test_init(void) {
-    ESP_LOGI(TAG, "Initializing PCM5102A I2S on LCK=%d, DIN=%d, BCK=%d, SCK=%d...",
+    ESP_LOGI(TAG, "Configuring PCM5102A: LCK=%d, DIN=%d, BCK=%d, SCK=%d",
              PIN_I2S_LCK, PIN_I2S_DIN, PIN_I2S_BCK, PIN_I2S_SCK);
 
-    // 1. Channel configuration
+    // 1. Force SCK (GPIO 5) to LOW (0V / GND)
+    // PCM5102A requires SCK tied to GND to activate its internal PLL and auto-generate MCLK from BCK.
+    gpio_config_t sck_conf = {
+        .pin_bit_mask = (1ULL << PIN_I2S_SCK),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&sck_conf);
+    gpio_set_level((gpio_num_t)PIN_I2S_SCK, 0);
+
+    // 2. Channel configuration
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
 
@@ -30,12 +42,13 @@ esp_err_t audio_test_init(void) {
         return ret;
     }
 
-    // 2. Standard mode configuration (44.1kHz, 16-bit Stereo)
+    // 3. Standard Philips I2S mode configuration (44.1kHz, 16-bit Stereo)
+    // PCM5102A expects PHILIPS I2S format (not Left-Justified/MSB)
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE),
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
-            .mclk = (gpio_num_t)PIN_I2S_SCK,
+            .mclk = I2S_GPIO_UNUSED, // PCM5102A uses internal PLL when SCK is grounded
             .bclk = (gpio_num_t)PIN_I2S_BCK,
             .ws   = (gpio_num_t)PIN_I2S_LCK,
             .dout = (gpio_num_t)PIN_I2S_DIN,
@@ -55,7 +68,7 @@ esp_err_t audio_test_init(void) {
         return ret;
     }
 
-    // 3. Enable channel
+    // 4. Enable I2S channel
     ret = i2s_channel_enable(tx_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enable I2S channel: %s", esp_err_to_name(ret));
@@ -64,7 +77,7 @@ esp_err_t audio_test_init(void) {
     }
 
     s_audio_ready = true;
-    ESP_LOGI(TAG, "PCM5102A I2S driver initialized successfully!");
+    ESP_LOGI(TAG, "PCM5102A I2S driver initialized with Philips standard format!");
     return ESP_OK;
 }
 
@@ -72,7 +85,7 @@ bool audio_is_ready(void) {
     return s_audio_ready;
 }
 
-// Generate and play a note with smooth attack and decay envelope
+// Generate and output a clean sine wave
 static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) {
     if (!s_audio_ready || tx_handle == NULL) return;
 
@@ -87,16 +100,17 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
             size_t sample_idx = samples_generated + i;
             float t = (float)sample_idx / AUDIO_SAMPLE_RATE;
 
-            // Envelope: 20ms attack, exponential decay
+            // Attack & release envelope
             float envelope = 1.0f;
             float time_ms = (float)sample_idx * 1000.0f / AUDIO_SAMPLE_RATE;
-            if (time_ms < 20.0f) {
-                envelope = time_ms / 20.0f;
-            } else {
-                envelope = expf(-(time_ms - 20.0f) / (duration_ms * 0.45f));
+            float remain_ms = (float)(total_samples - sample_idx) * 1000.0f / AUDIO_SAMPLE_RATE;
+            if (time_ms < 15.0f) {
+                envelope = time_ms / 15.0f;
+            } else if (remain_ms < 20.0f) {
+                envelope = remain_ms / 20.0f;
             }
 
-            float sample_val = sinf(2.0f * M_PI * freq_hz * t) * envelope * max_amplitude * 30000.0f;
+            float sample_val = sinf(2.0f * M_PI * freq_hz * t) * envelope * max_amplitude * 32000.0f;
             int16_t pcm = (int16_t)sample_val;
 
             buffer[i * 2]     = pcm; // Left channel
@@ -113,10 +127,10 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
 void audio_play_chime(void) {
     if (!s_audio_ready) return;
     ESP_LOGI(TAG, "Playing startup sound chime...");
-    play_tone(523.25f, 130, 0.6f); // C5
-    play_tone(659.25f, 130, 0.65f); // E5
-    play_tone(783.99f, 130, 0.7f); // G5
-    play_tone(1046.50f, 350, 0.85f); // C6
+    play_tone(523.25f, 160, 0.9f); // C5
+    play_tone(659.25f, 160, 0.9f); // E5
+    play_tone(783.99f, 160, 0.9f); // G5
+    play_tone(1046.50f, 400, 0.95f); // C6
 }
 
 // Provide animated visualizer levels (simulated equalizer)

@@ -10,15 +10,22 @@
 #include "audio_test.h"
 
 static const char *TAG = "MAIN_APP";
-
 #define NUM_VIZ_BARS 14
+
+static void audio_player_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Audio task started: playing repetitive test chime...");
+    while (1) {
+        audio_play_chime();
+        vTaskDelay(pdMS_TO_TICKS(1500)); // Wait 1.5 seconds and replay chime
+    }
+}
 
 void app_main(void) {
     ESP_LOGI(TAG, "=========================================");
     ESP_LOGI(TAG, "  ESP32-S3 ZERO HARDWARE DIAGNOSTIC TEST ");
     ESP_LOGI(TAG, "=========================================");
 
-    // 1. Initialize NVS (non-volatile storage)
+    // 1. Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -31,10 +38,10 @@ void app_main(void) {
     bool lcd_ok = (st7735_init() == ESP_OK);
 
     if (lcd_ok) {
-        // Clear screen to modern dark background
+        // Clear screen to modern dark navy background
         st7735_fill_screen(COLOR_BG_DARK);
 
-        // Render Header Bar (Y: 0 -> 18)
+        // Header Bar (Y: 0 -> 18)
         st7735_fill_rect(0, 0, ST7735_WIDTH, 18, COLOR_HEADER);
         st7735_draw_fast_h_line(0, 18, ST7735_WIDTH, COLOR_INDIGO);
         st7735_draw_string(6, 5, "ESP32-S3 ZERO", COLOR_WHITE, COLOR_HEADER, 1);
@@ -44,7 +51,7 @@ void app_main(void) {
         st7735_fill_rect(4, 22, 152, 54, COLOR_CARD);
         st7735_draw_rect(4, 22, 152, 54, COLOR_CARD_BORDER);
 
-        // LCD Status
+        // LCD Status line
         st7735_draw_string(8, 28, "[OK] LCD ST7735S", COLOR_GREEN_OK, COLOR_CARD, 1);
         st7735_draw_string(114, 28, "160x128", COLOR_SLATE, COLOR_CARD, 1);
     } else {
@@ -59,26 +66,24 @@ void app_main(void) {
         if (audio_ok) {
             st7735_draw_string(8, 42, "[OK] I2S PCM5102A", COLOR_GREEN_OK, COLOR_CARD, 1);
             st7735_draw_string(114, 42, "44.1kHz", COLOR_SLATE, COLOR_CARD, 1);
-            st7735_draw_string(8, 56, "[OK] HARDWARE READY", COLOR_CYAN, COLOR_CARD, 1);
+            st7735_draw_string(8, 56, "[>] AUDIO OUTPUT ON", COLOR_CYAN, COLOR_CARD, 1);
         } else {
             st7735_draw_string(8, 42, "[ERR] PCM5102A FAIL", COLOR_RED, COLOR_CARD, 1);
             st7735_draw_string(8, 56, "Check I2S Connections", COLOR_AMBER, COLOR_CARD, 1);
         }
     }
 
-    // 4. If both hardware devices are OK -> Play Chime & Start Running Text Animation
+    // 4. Start audio task and visual animation
     if (lcd_ok && audio_ok) {
-        ESP_LOGI(TAG, "Both hardware peripherals are OK! Playing startup chime...");
-        audio_play_chime();
+        // Start independent audio player task in background
+        xTaskCreate(audio_player_task, "audio_player", 4096, NULL, 5, NULL);
 
-        // Banner text for ticker marquee
-        const char *marquee_text = " *** ESP32-S3 ZERO + ST7735S + PCM5102A KET NOI OK - HE THONG SAN SANG PHAT NHAC *** ";
+        // Marquee ticker text
+        const char *marquee_text = " *** ESP32-S3 ZERO + ST7735S + PCM5102A DANG PHAT AM THANH - VUI LONG KIEM TRA LOA / TAI NGHE *** ";
         int16_t scroll_x = ST7735_WIDTH;
-
         uint8_t viz_levels[NUM_VIZ_BARS];
-        uint32_t chime_timer = 0;
 
-        ESP_LOGI(TAG, "Entering main animation & marquee loop...");
+        ESP_LOGI(TAG, "Entering animation and marquee display loop...");
         while (1) {
             // Draw Running Text Marquee at bottom (Y: 108 -> 126)
             st7735_draw_marquee(108, 18, marquee_text, scroll_x, COLOR_GREEN_OK, COLOR_CARD);
@@ -87,13 +92,6 @@ void app_main(void) {
             // Draw animated Equalizer Waveform in middle area (Y: 80 -> 102)
             audio_get_visualizer_data(viz_levels, NUM_VIZ_BARS);
             st7735_draw_visualizer(8, 80, 144, 22, viz_levels, NUM_VIZ_BARS);
-
-            // Replay pleasant melodic chime every 10 seconds to confirm audio output continuously
-            chime_timer += 40;
-            if (chime_timer >= 10000) {
-                chime_timer = 0;
-                audio_play_chime();
-            }
 
             vTaskDelay(pdMS_TO_TICKS(40)); // ~25 FPS smooth ticker
         }
