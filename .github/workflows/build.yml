@@ -15,48 +15,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Reconstruct ESP-IDF Project Structure
-        run: |
-          # Create ESP-IDF standard directories
-          mkdir -p project/main
-          mkdir -p project/components
-
-          # Copy main application files
-          cp CD_NOW.ino project/main/main.cpp
-          cp *.h project/main/ || true
-          cp idf_component.yml project/main/
-          cp CMakeLists_main.txt project/main/CMakeLists.txt
-          cp sdkconfig.defaults project/
-
-          # Create root CMakeLists.txt
-          printf 'cmake_minimum_required(VERSION 3.16)\nadd_compile_definitions("esp_wifi_set_band_mode=(int)" "WIFI_BAND_MODE_2G_ONLY=0")\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(CD_NOW)\n' > project/CMakeLists.txt
-
-          # Clone and configure external libraries (components)
-          # 1. ESP32-HUB75-MatrixPanel-I2S-DMA
-          git clone --depth 1 https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-I2S-DMA.git project/components/ESP32-HUB75-MatrixPanel-I2S-DMA
-          cp CMakeLists_hub75.txt project/components/ESP32-HUB75-MatrixPanel-I2S-DMA/CMakeLists.txt
-
-          # 2. Adafruit-GFX-Library
-          git clone --depth 1 https://github.com/adafruit/Adafruit-GFX-Library.git project/components/Adafruit-GFX-Library
-          cp CMakeLists_adafruit_gfx.txt project/components/Adafruit-GFX-Library/CMakeLists.txt
-
-          # 3. Adafruit_BusIO
-          git clone --depth 1 https://github.com/adafruit/Adafruit_BusIO.git project/components/Adafruit_BusIO
-          cp CMakeLists_adafruit_busio.txt project/components/Adafruit_BusIO/CMakeLists.txt
-
-          # 4. U8g2_for_Adafruit_GFX
-          git clone --depth 1 https://github.com/olikraus/U8g2_for_Adafruit_GFX.git project/components/U8g2_for_Adafruit_GFX
-          cp CMakeLists_u8g2_for_adafruit_gfx.txt project/components/U8g2_for_Adafruit_GFX/CMakeLists.txt
-
-          # 5. U8g2
-          git clone --depth 1 https://github.com/olikraus/u8g2.git project/components/u8g2
-          echo 'idf_component_register()' > project/components/u8g2/CMakeLists.txt
-
       - name: Build Firmware
         shell: bash
         run: |
           . $IDF_PATH/export.sh
-          cd project
+          idf.py set-target esp32s3
           idf.py build
 
       - name: Upload Firmware Artifacts
@@ -64,6 +27,6 @@ jobs:
         with:
           name: esp32-firmware
           path: |
-            project/build/bootloader/bootloader.bin
-            project/build/partition_table/partition-table.bin
-            project/build/*.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/*.bin

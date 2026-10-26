@@ -4,3 +4,4 @@ build/
 .vscode/
 builder_config.json
 cloud_builder.py
+__pycache__/
