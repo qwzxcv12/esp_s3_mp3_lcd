@@ -6,6 +6,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
+#include "esp_psram.h"
+#include "esp_heap_caps.h"
 #include "st7735.h"
 #include "audio_test.h"
 #include "mic_test.h"
@@ -23,7 +25,7 @@ static void audio_player_task(void *pvParameters) {
 
 void app_main(void) {
     ESP_LOGI(TAG, "=========================================");
-    ESP_LOGI(TAG, " ESP32-S3 LAB: LCD + DAC + MIC INMP441   ");
+    ESP_LOGI(TAG, " ESP32-S3 LAB: LCD + DAC + MIC + PSRAM   ");
     ESP_LOGI(TAG, "=========================================");
 
     // 1. Initialize NVS
@@ -33,6 +35,14 @@ void app_main(void) {
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // Query PSRAM and Heap statistics
+    size_t psram_size = esp_psram_get_size();
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t total_free = esp_get_free_heap_size();
+    ESP_LOGI(TAG, ">>> PSRAM Total: %u bytes (%u KB)", (unsigned int)psram_size, (unsigned int)(psram_size / 1024));
+    ESP_LOGI(TAG, ">>> PSRAM Free : %u bytes (%u KB)", (unsigned int)psram_free, (unsigned int)(psram_free / 1024));
+    ESP_LOGI(TAG, ">>> Total Free Heap: %u bytes (%u KB)", (unsigned int)total_free, (unsigned int)(total_free / 1024));
 
     // 2. Initialize LCD ST7735S (SPI: SCL=7, SDA=8, RST=9, DC=10, CS=11, BLK=12)
     ESP_LOGI(TAG, "Initializing ST7735S LCD...");
@@ -46,15 +56,11 @@ void app_main(void) {
         st7735_fill_rect(0, 0, ST7735_WIDTH, 17, COLOR_HEADER);
         st7735_draw_fast_h_line(0, 17, ST7735_WIDTH, COLOR_INDIGO);
         st7735_draw_string(6, 5, "ESP32-S3 AUDIO LAB", COLOR_WHITE, COLOR_HEADER, 1);
-        st7735_draw_string(132, 5, "v2.0", COLOR_CYAN, COLOR_HEADER, 1);
+        st7735_draw_string(132, 5, "v2.1", COLOR_CYAN, COLOR_HEADER, 1);
 
-        // Hardware Status Card Frame (Y: 20 -> 64)
-        st7735_fill_rect(4, 20, 152, 45, COLOR_CARD);
-        st7735_draw_rect(4, 20, 152, 45, COLOR_CARD_BORDER);
-
-        // LCD Status line
-        st7735_draw_string(8, 24, "[OK] LCD ST7735S", COLOR_GREEN_OK, COLOR_CARD, 1);
-        st7735_draw_string(114, 24, "160x128", COLOR_SLATE, COLOR_CARD, 1);
+        // Hardware Status Card Frame (Y: 19 -> 65)
+        st7735_fill_rect(4, 19, 152, 46, COLOR_CARD);
+        st7735_draw_rect(4, 19, 152, 46, COLOR_CARD_BORDER);
     } else {
         ESP_LOGE(TAG, "LCD ST7735S initialization FAILED!");
     }
@@ -64,12 +70,9 @@ void app_main(void) {
     bool audio_ok = (audio_test_init() == ESP_OK);
 
     if (lcd_ok) {
-        if (audio_ok) {
-            st7735_draw_string(8, 36, "[OK] DAC PCM5102A", COLOR_GREEN_OK, COLOR_CARD, 1);
-            st7735_draw_string(114, 36, "I2S0 OK", COLOR_SLATE, COLOR_CARD, 1);
-        } else {
-            st7735_draw_string(8, 36, "[ERR] DAC FAIL", COLOR_RED, COLOR_CARD, 1);
-        }
+        // Line 1: LCD and DAC status
+        st7735_draw_string(8, 23, "[OK] LCD 160x128", COLOR_GREEN_OK, COLOR_CARD, 1);
+        st7735_draw_string(106, 23, "DAC I2S0", audio_ok ? COLOR_CYAN : COLOR_RED, COLOR_CARD, 1);
     }
 
     // 4. Initialize Mic INMP441 on I2S_NUM_1 (SCK=5, WS=6, SD=13)
@@ -77,11 +80,20 @@ void app_main(void) {
     bool mic_ok = (mic_test_init() == ESP_OK);
 
     if (lcd_ok) {
-        if (mic_ok) {
-            st7735_draw_string(8, 48, "[OK] MIC INMP441", COLOR_GREEN_OK, COLOR_CARD, 1);
-            st7735_draw_string(114, 48, "DSP NS", COLOR_CYAN, COLOR_CARD, 1);
+        // Line 2: Mic status
+        st7735_draw_string(8, 36, "[OK] MIC INMP441", mic_ok ? COLOR_GREEN_OK : COLOR_RED, COLOR_CARD, 1);
+        st7735_draw_string(114, 36, "DSP NS", COLOR_CYAN, COLOR_CARD, 1);
+
+        // Line 3: PSRAM status
+        if (psram_size > 0) {
+            char psram_str[32];
+            snprintf(psram_str, sizeof(psram_str), "[OK] PSRAM %uMB", (unsigned int)(psram_size / (1024 * 1024)));
+            st7735_draw_string(8, 49, psram_str, COLOR_GREEN_OK, COLOR_CARD, 1);
+            char heap_str[16];
+            snprintf(heap_str, sizeof(heap_str), "RAM %uM", (unsigned int)(total_free / (1024 * 1024)));
+            st7735_draw_string(108, 49, heap_str, COLOR_AMBER, COLOR_CARD, 1);
         } else {
-            st7735_draw_string(8, 48, "[ERR] MIC FAIL", COLOR_RED, COLOR_CARD, 1);
+            st7735_draw_string(8, 49, "[--] PSRAM NOT DETECTED", COLOR_SLATE, COLOR_CARD, 1);
         }
     }
 
@@ -93,7 +105,7 @@ void app_main(void) {
         }
 
         // Ticker marquee banner
-        const char *marquee_text = " *** ESP32-S3: MIC INMP441 (S5 W6 D13) & DAC PCM5102A HOAT DONG DONG THOI *** ";
+        const char *marquee_text = " *** ESP32-S3: 2MB PSRAM KICH HOAT THANH CONG - SAN SANG STREAMING LMS 24/7 *** ";
         int16_t scroll_x = ST7735_WIDTH;
         uint8_t viz_levels[NUM_VIZ_BARS];
         char level_str[16];
