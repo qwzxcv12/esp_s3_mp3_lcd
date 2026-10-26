@@ -79,7 +79,7 @@ void app_main(void) {
     if (lcd_ok) {
         if (mic_ok) {
             st7735_draw_string(8, 48, "[OK] MIC INMP441", COLOR_GREEN_OK, COLOR_CARD, 1);
-            st7735_draw_string(114, 48, "I2S1 OK", COLOR_CYAN, COLOR_CARD, 1);
+            st7735_draw_string(114, 48, "DSP NS", COLOR_CYAN, COLOR_CARD, 1);
         } else {
             st7735_draw_string(8, 48, "[ERR] MIC FAIL", COLOR_RED, COLOR_CARD, 1);
         }

@@ -17,30 +17,54 @@ static uint8_t s_bars[16] = {0};
 static float s_dc_x_l = 0.0f, s_dc_y_l = 0.0f;
 static float s_dc_x_r = 0.0f, s_dc_y_r = 0.0f;
 
-// First-order IIR DC-blocking High-Pass Filter (removes MEMS resting bias voltage)
-static inline float dc_block_filter_left(float sample) {
+// Bandpass filter state (HPF 250Hz, LPF 3500Hz for human speech)
+static float s_hpf_x_l = 0.0f, s_hpf_y_l = 0.0f;
+static float s_lpf_y_l = 0.0f;
+static float s_hpf_x_r = 0.0f, s_hpf_y_r = 0.0f;
+static float s_lpf_y_r = 0.0f;
+
+// 1. DC-blocking High-Pass Filter (removes MEMS resting bias voltage)
+static inline float dc_block_filter(float sample, float *prev_x, float *prev_y) {
     const float R = 0.995f;
-    float y = sample - s_dc_x_l + R * s_dc_y_l;
-    s_dc_x_l = sample;
-    s_dc_y_l = y;
+    float y = sample - *prev_x + R * (*prev_y);
+    *prev_x = sample;
+    *prev_y = y;
     return y;
 }
 
-static inline float dc_block_filter_right(float sample) {
-    const float R = 0.995f;
-    float y = sample - s_dc_x_r + R * s_dc_y_r;
-    s_dc_x_r = sample;
-    s_dc_y_r = y;
+// 2. High-pass filter at ~250Hz (cuts wind, fan hum, 50Hz mains hum, table rumble)
+static inline float hpf_voice(float sample, float *prev_x, float *prev_y) {
+    const float alpha_hp = 0.9106f; // fc ~ 250Hz at Fs=16kHz
+    float y = alpha_hp * (*prev_y + sample - *prev_x);
+    *prev_x = sample;
+    *prev_y = y;
     return y;
+}
+
+// 3. Low-pass filter at ~3500Hz (cuts high-frequency hiss, switching noise)
+static inline float lpf_voice(float sample, float *prev_y) {
+    const float alpha_lp = 0.5788f; // fc ~ 3500Hz at Fs=16kHz
+    float y = *prev_y + alpha_lp * (sample - *prev_y);
+    *prev_y = y;
+    return y;
+}
+
+// Complete Speech Bandpass Filter pipeline
+static inline float apply_speech_filter(float raw, float *dc_x, float *dc_y, float *hp_x, float *hp_y, float *lp_y) {
+    float no_dc = dc_block_filter(raw, dc_x, dc_y);
+    float no_rumble = hpf_voice(no_dc, hp_x, hp_y);
+    float clean_speech = lpf_voice(no_rumble, lp_y);
+    return clean_speech;
 }
 
 static void mic_reader_task(void *pvParameters) {
     const size_t SAMPLES_COUNT = 256;
-    static int32_t raw_buffer[256 * 2]; // Static allocation to prevent task stack overflow
+    static int32_t raw_buffer[256 * 2]; // Static allocation to protect task stack
     float smoothed_rms = 0.0f;
+    float adaptive_noise_floor = 300.0f; // Continuously tracks ambient room noise
     uint32_t step = 0;
 
-    ESP_LOGI(TAG, "INMP441 real-time reader task running with DC-block filter...");
+    ESP_LOGI(TAG, "INMP441 DSP Noise Suppression & Bandpass Filter active (250Hz - 3500Hz)...");
 
     while (1) {
         size_t bytes_read = 0;
@@ -55,42 +79,58 @@ static void mic_reader_task(void *pvParameters) {
                 int32_t raw_l = raw_buffer[i * 2] >> 8;
                 int32_t raw_r = raw_buffer[i * 2 + 1] >> 8;
 
-                // Remove DC bias from both channels
-                float ac_l = dc_block_filter_left((float)raw_l);
-                float ac_r = dc_block_filter_right((float)raw_r);
+                // Pass both channels through Speech Bandpass DSP filter
+                float clean_l = apply_speech_filter((float)raw_l, &s_dc_x_l, &s_dc_y_l, &s_hpf_x_l, &s_hpf_y_l, &s_lpf_y_l);
+                float clean_r = apply_speech_filter((float)raw_r, &s_dc_x_r, &s_dc_y_r, &s_hpf_x_r, &s_hpf_y_r, &s_lpf_y_r);
 
-                sum_sq_l += (double)(ac_l * ac_l);
-                sum_sq_r += (double)(ac_r * ac_r);
+                sum_sq_l += (double)(clean_l * clean_l);
+                sum_sq_r += (double)(clean_r * clean_r);
             }
 
             float rms_l = (samples_read > 0) ? sqrtf((float)(sum_sq_l / samples_read)) : 0.0f;
             float rms_r = (samples_read > 0) ? sqrtf((float)(sum_sq_r / samples_read)) : 0.0f;
 
-            // Automatically select active channel (immune to L/R pin grounding differences)
+            // Automatically select active microphone channel
             float active_rms = (rms_l > rms_r) ? rms_l : rms_r;
 
-            // Apply noise gate to cut ambient room floor noise
-            const float NOISE_GATE = 400.0f;
-            if (active_rms < NOISE_GATE) {
-                active_rms = 0.0f;
+            // --- Adaptive Noise Floor Tracking ---
+            // If sound is quiet, track the room noise floor quickly
+            if (active_rms < adaptive_noise_floor) {
+                adaptive_noise_floor = adaptive_noise_floor * 0.90f + active_rms * 0.10f;
             } else {
-                active_rms -= NOISE_GATE;
+                // When speaking, adapt up very slowly so human speech does not inflate noise floor
+                adaptive_noise_floor = adaptive_noise_floor * 0.998f + active_rms * 0.002f;
             }
 
-            // Smooth the level: fast attack, smooth decay
-            if (active_rms > smoothed_rms) {
-                smoothed_rms = smoothed_rms * 0.3f + active_rms * 0.7f;
+            // Ensure baseline minimum floor
+            if (adaptive_noise_floor < 150.0f) adaptive_noise_floor = 150.0f;
+
+            // --- Soft Dynamic Expander (Spectral Noise Reduction) ---
+            // Threshold = 1.35x ambient noise floor
+            float noise_threshold = adaptive_noise_floor * 1.35f;
+            float voice_signal = 0.0f;
+            if (active_rms > noise_threshold) {
+                // Significant human voice activity above background noise!
+                voice_signal = active_rms - noise_threshold;
             } else {
-                smoothed_rms = smoothed_rms * 0.88f + active_rms * 0.12f;
+                // Sub-threshold ambient noise: fully suppressed
+                voice_signal = 0.0f;
             }
 
-            // Map smoothed RMS to 0 - 100% (35,000 RMS is loud speaking/clap level)
-            float pct = (smoothed_rms / 35000.0f) * 100.0f;
+            // Smooth the level envelope: immediate attack, natural speech decay
+            if (voice_signal > smoothed_rms) {
+                smoothed_rms = smoothed_rms * 0.20f + voice_signal * 0.80f;
+            } else {
+                smoothed_rms = smoothed_rms * 0.85f + voice_signal * 0.15f;
+            }
+
+            // Scale to 0 - 100% (25,000 counts = standard speaking level)
+            float pct = (smoothed_rms / 25000.0f) * 100.0f;
             if (pct < 0.0f) pct = 0.0f;
             if (pct > 100.0f) pct = 100.0f;
             s_current_level = (uint8_t)pct;
 
-            // Dynamic equalizer bars responding to live sound
+            // Dynamic equalizer bars responding only to human voice
             step++;
             for (int b = 0; b < 16; b++) {
                 float wave = 0.65f + 0.35f * sinf((float)b * 0.8f + (float)step * 0.25f);
