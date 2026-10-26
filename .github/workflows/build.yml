@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ "main", "master" ]
 
+env:
+  # Bật ccache tích hợp sẵn trong ESP-IDF
+  IDF_CCACHE_ENABLE: 1
+  # Đặt đường dẫn lưu ccache ngay trong thư mục workspace để actions/cache dễ quản lý
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 500M
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,12 +22,26 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Restore ESP-IDF Build Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ccache
+            managed_components
+            ~/.cache/idf-component-manager
+          # Tạo key dựa trên hệ điều hành, target và sự thay đổi của sdkconfig / idf_component.yml
+          key: esp32s3-idf5.3-${{ runner.os }}-${{ hashFiles('sdkconfig*', '**/idf_component.yml', 'CMakeLists.txt') }}
+          restore-keys: |
+            esp32s3-idf5.3-${{ runner.os }}-
+
       - name: Build Firmware
         shell: bash
         run: |
           . $IDF_PATH/export.sh
-          idf.py set-target esp32s3
-          idf.py build
+          # Truyền trực tiếp IDF_TARGET vào build để tránh lệnh set-target xóa sạch cache/sdkconfig
+          idf.py -DIDF_TARGET=esp32s3 build
+          # Hiển thị thống kê ccache để kiểm tra tỷ lệ cache hit trên log
+          ccache -s
 
       - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
