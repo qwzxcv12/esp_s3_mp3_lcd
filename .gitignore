@@ -6,3 +6,6 @@ builder_config.json
 cloud_builder.py
 __pycache__/
 .ccache/
+*.zip
+telnet_dump*.txt
+esp32_firmware_temp.zip

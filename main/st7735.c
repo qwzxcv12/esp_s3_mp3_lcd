@@ -236,6 +236,9 @@ esp_err_t st7735_init(void) {
 }
 
 void st7735_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
+    // Clip negative coordinates (avoids garbage windows from uint16 wrap-around)
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
     if (x >= ST7735_WIDTH || y >= ST7735_HEIGHT || w <= 0 || h <= 0) return;
     if (x + w > ST7735_WIDTH) w = ST7735_WIDTH - x;
     if (y + h > ST7735_HEIGHT) h = ST7735_HEIGHT - y;
@@ -282,23 +285,40 @@ void st7735_draw_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color
 
 void st7735_draw_char(int16_t x, int16_t y, char c, uint16_t color, uint16_t bg, uint8_t size) {
     if (c < 32 || c > 126) c = ' ';
+    if (size == 0) size = 1;
+    if (size > 4) size = 4;
     uint8_t idx = c - 32;
 
-    for (int col = 0; col < 5; col++) {
-        uint8_t line = font5x7[idx][col];
-        for (int row = 0; row < 7; row++) {
-            uint16_t pixel_color = (line & (1 << row)) ? color : bg;
-            if (pixel_color != bg || bg != color) {
-                if (size == 1) {
-                    st7735_fill_rect(x + col, y + row, 1, 1, pixel_color);
-                } else {
-                    st7735_fill_rect(x + col * size, y + row * size, size, size, pixel_color);
-                }
-            }
+    // Character cell = 6 columns (5 glyph + 1 spacing) x 7 rows, scaled by size
+    const int16_t cell_w = 6 * size;
+    const int16_t cell_h = 7 * size;
+
+    // Clip the cell against the screen
+    int16_t x0 = (x < 0) ? 0 : x;
+    int16_t y0 = (y < 0) ? 0 : y;
+    int16_t x1 = x + cell_w; if (x1 > ST7735_WIDTH)  x1 = ST7735_WIDTH;
+    int16_t y1 = y + cell_h; if (y1 > ST7735_HEIGHT) y1 = ST7735_HEIGHT;
+    if (x0 >= x1 || y0 >= y1) return;
+
+    // Render the whole visible cell into one buffer and send it in a single
+    // window write (1 window + 1 data transfer instead of ~210 tiny SPI
+    // polling transactions per character -> massively lower CPU load).
+    static uint8_t buf[(6 * 4) * (7 * 4) * 2];
+    size_t n = 0;
+    const uint8_t fg_hi = color >> 8, fg_lo = color & 0xFF;
+    const uint8_t bg_hi = bg >> 8,    bg_lo = bg & 0xFF;
+    for (int16_t py = y0; py < y1; py++) {
+        int row = (py - y) / size;
+        for (int16_t px = x0; px < x1; px++) {
+            int col = (px - x) / size;
+            bool on = (col < 5) && (font5x7[idx][col] & (1 << row));
+            buf[n++] = on ? fg_hi : bg_hi;
+            buf[n++] = on ? fg_lo : bg_lo;
         }
     }
-    // 1-pixel space between characters
-    st7735_fill_rect(x + 5 * size, y, size, 7 * size, bg);
+
+    st7735_set_window(x0, y0, x1 - 1, y1 - 1);
+    lcd_write_data(buf, n);
 }
 
 void st7735_draw_string(int16_t x, int16_t y, const char *str, uint16_t color, uint16_t bg, uint8_t size) {

@@ -207,8 +207,8 @@ esp_err_t mic_test_init(void) {
     s_mic_ready = true;
     ESP_LOGI(TAG, "INMP441 I2S_NUM_1 driver initialized successfully!");
 
-    // 5. Start background reading task with generous stack
-    xTaskCreate(mic_reader_task, "mic_reader", 6144, NULL, 4, NULL);
+    // 5. Start background reading task with generous stack (core 0, audio owns core 1)
+    xTaskCreatePinnedToCore(mic_reader_task, "mic_reader", 6144, NULL, 4, NULL, 0);
 
     return ESP_OK;
 }

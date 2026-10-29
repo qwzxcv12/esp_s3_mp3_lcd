@@ -15,8 +15,23 @@
 static const char *TAG = "MAIN_APP";
 #define NUM_VIZ_BARS 14
 
+static TaskHandle_t s_audio_task = NULL;
+
+static const char *reset_reason_str(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:  return "POWERON";
+        case ESP_RST_SW:       return "SW";
+        case ESP_RST_PANIC:    return "PANIC";
+        case ESP_RST_INT_WDT:  return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT:      return "WDT";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        default:               return "OTHER";
+    }
+}
+
 static void audio_player_task(void *pvParameters) {
-    ESP_LOGI(TAG, "Audio task started: playing periodic test chime...");
+    ESP_LOGI(TAG, "Audio task started on core %d: playing periodic test chime...", xPortGetCoreID());
     while (1) {
         audio_play_chime();
         vTaskDelay(pdMS_TO_TICKS(3000)); // Play chime every 3 seconds
@@ -27,6 +42,14 @@ void app_main(void) {
     ESP_LOGI(TAG, "=========================================");
     ESP_LOGI(TAG, " ESP32-S3 LAB: LCD + DAC + MIC + PSRAM   ");
     ESP_LOGI(TAG, "=========================================");
+
+    // Report why we booted: BROWNOUT here = power supply sagging (amp overload)
+    esp_reset_reason_t rst = esp_reset_reason();
+    if (rst == ESP_RST_BROWNOUT) {
+        ESP_LOGE(TAG, ">>> Reset reason: BROWNOUT - nguon bi sut ap (qua tai loa/ampli)!");
+    } else {
+        ESP_LOGI(TAG, ">>> Reset reason: %s", reset_reason_str(rst));
+    }
 
     // 1. Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -98,17 +121,20 @@ void app_main(void) {
     }
 
     // 5. Start audio playback and real-time mic visualizer
-    if (lcd_ok) {
-        if (audio_ok) {
-            // Play periodic chime in background
-            xTaskCreate(audio_player_task, "audio_player", 4096, NULL, 5, NULL);
-        }
+    if (audio_ok) {
+        // Audio on its own core (1) with high priority so LCD/mic work on core 0
+        // can never starve the I2S feed. Started even if the LCD failed.
+        xTaskCreatePinnedToCore(audio_player_task, "audio_player", 4096, NULL, 10, &s_audio_task, 1);
+    }
 
+    if (lcd_ok) {
         // Ticker marquee banner
         const char *marquee_text = " *** ESP32-S3: 2MB PSRAM KICH HOAT THANH CONG - SAN SANG STREAMING LMS 24/7 *** ";
+        const int16_t marquee_width = (int16_t)(strlen(marquee_text) * 6);
         int16_t scroll_x = ST7735_WIDTH;
         uint8_t viz_levels[NUM_VIZ_BARS];
         char level_str[16];
+        TickType_t last_health = xTaskGetTickCount();
 
         ESP_LOGI(TAG, "Entering real-time Mic VU meter and display loop...");
         while (1) {
@@ -144,8 +170,25 @@ void app_main(void) {
             // C. Draw Marquee Ticker at bottom (Y: 108 -> 126)
             st7735_draw_marquee(108, 18, marquee_text, scroll_x, COLOR_GREEN_OK, COLOR_CARD);
             scroll_x -= 2;
+            // Wrap to avoid int16_t overflow after ~11 minutes of scrolling
+            if (scroll_x <= -marquee_width) scroll_x += marquee_width;
+
+            // D. Health report every 5s (heap, stack headroom) for diagnosing stalls
+            if ((xTaskGetTickCount() - last_health) >= pdMS_TO_TICKS(5000)) {
+                last_health = xTaskGetTickCount();
+                ESP_LOGI(TAG, "Health: heap=%u min=%u | audio_stack_free=%u | main_stack_free=%u",
+                         (unsigned)esp_get_free_heap_size(),
+                         (unsigned)esp_get_minimum_free_heap_size(),
+                         s_audio_task ? (unsigned)uxTaskGetStackHighWaterMark(s_audio_task) : 0u,
+                         (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            }
 
             vTaskDelay(pdMS_TO_TICKS(40)); // 25 FPS responsive loop
         }
+    }
+
+    // Keep app_main alive when the LCD failed so the audio task keeps running
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

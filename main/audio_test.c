@@ -10,6 +10,7 @@
 static const char *TAG = "AUDIO_I2S";
 static i2s_chan_handle_t tx_handle = NULL;
 static bool s_audio_ready = false;
+static uint32_t s_write_errors = 0;
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -97,6 +98,11 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
     const size_t CHUNK_SIZE = 256;
     static int32_t buffer[256 * 2]; // Static allocation to protect task stack
 
+    // Clamp requested amplitude and apply master volume to keep headroom
+    if (max_amplitude > 1.0f) max_amplitude = 1.0f;
+    if (max_amplitude < 0.0f) max_amplitude = 0.0f;
+    const float scale = max_amplitude * AUDIO_MASTER_VOLUME * 2147483000.0f;
+
     size_t samples_generated = 0;
     while (samples_generated < total_samples) {
         size_t chunk = (total_samples - samples_generated > CHUNK_SIZE) ? CHUNK_SIZE : (total_samples - samples_generated);
@@ -115,7 +121,7 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
             }
 
             // 32-bit PCM full scale: -2147483648 to 2147483647
-            float sample_val = sinf(2.0f * M_PI * freq_hz * t) * envelope * max_amplitude * 2147000000.0f;
+            float sample_val = sinf(2.0f * M_PI * freq_hz * t) * envelope * scale;
             int32_t pcm = (int32_t)sample_val;
 
             buffer[i * 2]     = pcm; // Left channel
@@ -123,7 +129,15 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
         }
 
         size_t bytes_written = 0;
-        i2s_channel_write(tx_handle, buffer, chunk * sizeof(int32_t) * 2, &bytes_written, pdMS_TO_TICKS(100));
+        esp_err_t wr = i2s_channel_write(tx_handle, buffer, chunk * sizeof(int32_t) * 2, &bytes_written, pdMS_TO_TICKS(100));
+        if (wr != ESP_OK || bytes_written != chunk * sizeof(int32_t) * 2) {
+            s_write_errors++;
+            if ((s_write_errors % 50) == 1) {
+                ESP_LOGW(TAG, "I2S write problem: %s, wrote %u/%u bytes (errors=%lu)",
+                         esp_err_to_name(wr), (unsigned)bytes_written,
+                         (unsigned)(chunk * sizeof(int32_t) * 2), (unsigned long)s_write_errors);
+            }
+        }
         samples_generated += chunk;
     }
 }
@@ -131,7 +145,7 @@ static void play_tone(float freq_hz, uint32_t duration_ms, float max_amplitude) 
 // Play startup melodic chime (C5 -> E5 -> G5 -> C6)
 void audio_play_chime(void) {
     if (!s_audio_ready) return;
-    ESP_LOGI(TAG, "Playing startup sound chime (32-bit)...");
+    ESP_LOGI(TAG, "Playing chime (vol=%.2f, i2s_err=%lu)", AUDIO_MASTER_VOLUME, (unsigned long)s_write_errors);
     play_tone(523.25f, 160, 0.95f); // C5
     play_tone(659.25f, 160, 0.95f); // E5
     play_tone(783.99f, 160, 0.95f); // G5

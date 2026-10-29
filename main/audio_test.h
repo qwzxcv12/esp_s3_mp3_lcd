@@ -12,6 +12,11 @@
 
 #define AUDIO_SAMPLE_RATE 44100
 
+// Master output volume (0.0 - 1.0). Full scale (1.0) drives PCM5102A to ~2.1Vrms,
+// which overloads small amplifiers (PAM8403...) -> clipping, current spikes,
+// supply brown-out or amplifier thermal shutdown. Keep headroom.
+#define AUDIO_MASTER_VOLUME 0.30f
+
 esp_err_t audio_test_init(void);
 bool audio_is_ready(void);
 void audio_play_chime(void);
