@@ -1,4 +1,4 @@
-﻿/*
+/*
  * SPDX-FileCopyrightText: 2022-2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
@@ -84,7 +84,7 @@ typedef struct {
 /* When set to 1 pressing ENTER will be extending with LineFeed during serial debug output */
 #define KEYBOARD_ENTER_LF_EXTEND    1
 /* When set to 1, numbers entered from the numeric keypad while ALT is pressed will be escaped */
-#define KEYBOARD_ENTER_ALT_ESCAPE   1
+#define KEYBOARD_ENTER_ALT_ESCAPE   0
 
 #if KEYBOARD_ENTER_ALT_ESCAPE
 static bool is_ansi = false;
@@ -137,8 +137,8 @@ const uint8_t keycode2ascii [57][2] = {
     {'0', ')'}, /* HID_KEY_0               */
     {KEYBOARD_ENTER_MAIN_CHAR, KEYBOARD_ENTER_MAIN_CHAR}, /* HID_KEY_ENTER           */
     {0, 0}, /* HID_KEY_ESC             */
-    {'\b', 0}, /* HID_KEY_DEL             */
-    {0, 0}, /* HID_KEY_TAB             */
+    {'\b', '\b'}, /* HID_KEY_DEL (Backspace) */
+    {'\t', '\t'}, /* HID_KEY_TAB             */
     {' ', ' '}, /* HID_KEY_SPACE           */
     {'-', '_'}, /* HID_KEY_MINUS           */
     {'=', '+'}, /* HID_KEY_EQUAL           */
@@ -323,6 +323,9 @@ static inline bool hid_keyboard_get_char(uint8_t modifier,
     return true;
 }
 
+static bool s_caps_lock = false;
+static bool s_num_lock = true;
+
 /**
  * @brief Key Event. Key event with the key code, state and modifier.
  *
@@ -331,17 +334,107 @@ static inline bool hid_keyboard_get_char(uint8_t modifier,
  */
 static void key_event_callback(key_event_t *key_event)
 {
-    unsigned char key_char;
-
     hid_print_new_device_report_header(HID_PROTOCOL_KEYBOARD);
 
-    if (KEY_STATE_PRESSED == key_event->state) {
-        if (hid_keyboard_get_char(key_event->modifier,
-                                  key_event->key_code, &key_char)) {
+    if (KEY_STATE_PRESSED != key_event->state) {
+        return;
+    }
 
-            hid_keyboard_print_char(key_char);
+    uint8_t kc = key_event->key_code;
+    uint8_t mod = key_event->modifier;
+    bool is_shift = hid_keyboard_is_modifier_shift(mod);
 
+    // 1. Letters: 'a' - 'z' (0x04 - 0x1D)
+    if (kc >= 0x04 && kc <= 0x1D) {
+        bool upper = is_shift ^ s_caps_lock;
+        char c = upper ? ('A' + (kc - 0x04)) : ('a' + (kc - 0x04));
+        putchar(c);
+        fflush(stdout);
+        return;
+    }
+
+    // 2. Main Row Numbers & basic symbols (0x1E - 0x38)
+    if (kc >= 0x1E && kc <= 0x38) {
+        uint8_t shift_idx = is_shift ? 1 : 0;
+        char c = keycode2ascii[kc][shift_idx];
+        if (c == KEYBOARD_ENTER_MAIN_CHAR) {
+            printf("\r\n");
+        } else if (c == '\b') {
+            printf("\b \b");
+        } else if (c) {
+            putchar(c);
         }
+        fflush(stdout);
+        return;
+    }
+
+    // 3. Special keys: Esc, Tab, Space, CapsLock
+    if (kc == 0x29) { // Escape
+        printf("[ESC]");
+        fflush(stdout);
+        return;
+    }
+    if (kc == 0x2B) { // Tab
+        putchar('\t');
+        fflush(stdout);
+        return;
+    }
+    if (kc == 0x39) { // CapsLock
+        s_caps_lock = !s_caps_lock;
+        return;
+    }
+
+    // 4. Function keys: F1 - F12 (0x3A - 0x45)
+    if (kc >= 0x3A && kc <= 0x45) {
+        printf("[F%d]", (kc - 0x3A + 1));
+        fflush(stdout);
+        return;
+    }
+
+    // 5. Navigation & Editing keys
+    switch (kc) {
+        case 0x46: printf("[PRTSC]"); fflush(stdout); return;
+        case 0x47: printf("[SCRLK]"); fflush(stdout); return;
+        case 0x48: printf("[PAUSE]"); fflush(stdout); return;
+        case 0x49: printf("[INS]"); fflush(stdout); return;
+        case 0x4A: printf("[HOME]"); fflush(stdout); return;
+        case 0x4B: printf("[PGUP]"); fflush(stdout); return;
+        case 0x4C: printf("[DEL]"); fflush(stdout); return;
+        case 0x4D: printf("[END]"); fflush(stdout); return;
+        case 0x4E: printf("[PGDN]"); fflush(stdout); return;
+        case 0x4F: printf("[RIGHT]"); fflush(stdout); return;
+        case 0x50: printf("[LEFT]"); fflush(stdout); return;
+        case 0x51: printf("[DOWN]"); fflush(stdout); return;
+        case 0x52: printf("[UP]"); fflush(stdout); return;
+        case 0x53: // NumLock
+            s_num_lock = !s_num_lock;
+            return;
+        default:
+            break;
+    }
+
+    // 6. Cụm phím số bên phải (Keypad / Numpad: 0x54 - 0x63)
+    if (kc >= 0x54 && kc <= 0x63) {
+        switch (kc) {
+            case 0x54: putchar('/'); break;
+            case 0x55: putchar('*'); break;
+            case 0x56: putchar('-'); break;
+            case 0x57: putchar('+'); break;
+            case 0x58: printf("\r\n"); break; // Keypad Enter
+            case 0x59: if (s_num_lock) putchar('1'); else printf("[END]"); break;
+            case 0x5A: if (s_num_lock) putchar('2'); else printf("[DOWN]"); break;
+            case 0x5B: if (s_num_lock) putchar('3'); else printf("[PGDN]"); break;
+            case 0x5C: if (s_num_lock) putchar('4'); else printf("[LEFT]"); break;
+            case 0x5D: if (s_num_lock) putchar('5'); break;
+            case 0x5E: if (s_num_lock) putchar('6'); else printf("[RIGHT]"); break;
+            case 0x5F: if (s_num_lock) putchar('7'); else printf("[HOME]"); break;
+            case 0x60: if (s_num_lock) putchar('8'); else printf("[UP]"); break;
+            case 0x61: if (s_num_lock) putchar('9'); else printf("[PGUP]"); break;
+            case 0x62: if (s_num_lock) putchar('0'); else printf("[INS]"); break;
+            case 0x63: if (s_num_lock) putchar('.'); else printf("[DEL]"); break;
+        }
+        fflush(stdout);
+        return;
     }
 }
 
