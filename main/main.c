@@ -805,36 +805,37 @@ void hid_host_device_callback(hid_host_device_handle_t hid_device_handle,
 
 void app_main(void)
 {
+    // Vo hieu hoa bo dem stdout de moi ky tu go duoc day tuc thoi vao phan cung UART (0ms delay)
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     BaseType_t task_created;
     app_event_queue_t evt_queue;
-    ESP_LOGI(TAG, "HID Host service starting...");
+    ESP_LOGI(TAG, "HID Host ultra-fast service starting...");
 
     // Create queue
-    app_event_queue = xQueueCreate(20, sizeof(app_event_queue_t));
+    app_event_queue = xQueueCreate(32, sizeof(app_event_queue_t));
 
     /*
     * Create usb_lib_task to:
     * - initialize USB Host library
-    * - Handle USB Host events continuously
+    * - Handle USB Host events continuously with High Priority (10)
     */
     task_created = xTaskCreatePinnedToCore(usb_lib_task,
                                            "usb_events",
                                            4096,
                                            xTaskGetCurrentTaskHandle(),
-                                           2, NULL, 0);
+                                           10, NULL, 0);
     assert(task_created == pdTRUE);
 
     // Wait for notification from usb_lib_task to proceed
     ulTaskNotifyTake(false, 1000);
 
     /*
-    * HID host driver configuration
-    * - create background task for handling low level event inside the HID driver
-    * - provide the device callback to get new HID Device connection event
+    * HID host driver configuration with High Priority (10)
     */
     const hid_host_driver_config_t hid_host_driver_config = {
         .create_background_task = true,
-        .task_priority = 5,
+        .task_priority = 10,
         .stack_size = 4096,
         .core_id = 0,
         .callback = hid_host_device_callback,
