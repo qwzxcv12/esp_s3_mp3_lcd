@@ -7,40 +7,62 @@ on:
     branches: [ "main", "master" ]
 
 env:
-  # Bật ccache tích hợp sẵn trong ESP-IDF
   IDF_CCACHE_ENABLE: 1
-  # Đặt đường dẫn lưu ccache ngay trong thư mục workspace để actions/cache dễ quản lý
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 500M
+  IDF_VERSION: v5.3.2
+  IDF_PATH: /home/runner/esp-idf
+  IDF_TOOLS_PATH: /home/runner/.espressif
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: espressif/idf:release-v5.3
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Restore ESP-IDF Build Cache
+      - name: Install System Packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flex bison gperf ccache dfu-util libusb-1.0-0 ninja-build
+
+      - name: Restore ESP-IDF Environment Cache
+        id: idf-env-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.IDF_PATH }}
+            ${{ env.IDF_TOOLS_PATH }}
+          # Key cố định theo phiên bản IDF: chỉ cài 1 lần duy nhất, các lần sau tải từ cache ra ngay
+          key: github-idf-${{ env.IDF_VERSION }}-esp32s3-${{ runner.os }}-v1
+
+      - name: Setup ESP-IDF (Only runs on first build)
+        if: steps.idf-env-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --shallow-submodules --recursive -b ${{ env.IDF_VERSION }} https://github.com/espressif/esp-idf.git ${{ env.IDF_PATH }}
+          # Xóa thư mục .git của esp-idf để giảm hàng trăm MB dung lượng cache, giúp các lần sau giải nén cực nhanh
+          rm -rf ${{ env.IDF_PATH }}/.git
+          ${{ env.IDF_PATH }}/install.sh esp32s3
+          # Xóa các file zip cài đặt đã tải về để nhẹ cache
+          rm -rf ${{ env.IDF_TOOLS_PATH }}/dist
+
+      - name: Restore Project Compile Cache (ccache & components)
         uses: actions/cache@v4
         with:
           path: |
             .ccache
             managed_components
             ~/.cache/idf-component-manager
-          # Tạo key dựa trên hệ điều hành, target và sự thay đổi của sdkconfig / idf_component.yml
-          key: esp32s3-idf5.3-${{ runner.os }}-${{ hashFiles('sdkconfig*', '**/idf_component.yml', 'CMakeLists.txt') }}
+          key: esp32s3-compile-${{ runner.os }}-${{ hashFiles('sdkconfig*', '**/idf_component.yml', 'CMakeLists.txt') }}
           restore-keys: |
-            esp32s3-idf5.3-${{ runner.os }}-
+            esp32s3-compile-${{ runner.os }}-
 
       - name: Build Firmware
         shell: bash
         run: |
-          . $IDF_PATH/export.sh
-          # Truyền trực tiếp IDF_TARGET vào build để tránh lệnh set-target xóa sạch cache/sdkconfig
+          . ${{ env.IDF_PATH }}/export.sh
           idf.py -DIDF_TARGET=esp32s3 build
-          # Hiển thị thống kê ccache để kiểm tra tỷ lệ cache hit trên log
           ccache -s
 
       - name: Upload Firmware Artifacts

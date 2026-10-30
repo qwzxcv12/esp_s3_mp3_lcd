@@ -27,7 +27,8 @@ static const char *TAG = "usb_host";
 QueueHandle_t app_event_queue = NULL;
 
 typedef enum {
-    APP_EVENT_HID_HOST = 0
+    APP_EVENT_HID_HOST = 0,
+    APP_EVENT_UPDATE_LEDS
 } app_event_group_t;
 
 /**
@@ -314,22 +315,36 @@ static bool s_caps_lock = false;
 static bool s_num_lock = true;
 static bool s_scroll_lock = false;
 static hid_host_device_handle_t s_kb_dev_handle = NULL;
+static uint8_t s_led_report_data[4] = {0};
+
+static void trigger_led_update(void)
+{
+    const app_event_queue_t evt = {
+        .event_group = APP_EVENT_UPDATE_LEDS
+    };
+    if (app_event_queue) {
+        xQueueSend(app_event_queue, &evt, 0);
+    }
+}
 
 static void update_keyboard_leds(void)
 {
     if (s_kb_dev_handle == NULL) {
         return;
     }
-    uint8_t leds = 0;
-    if (s_num_lock)   leds |= (1 << 0); // Bit 0: Num Lock LED
-    if (s_caps_lock)  leds |= (1 << 1); // Bit 1: Caps Lock LED
-    if (s_scroll_lock) leds |= (1 << 2); // Bit 2: Scroll Lock LED
+    s_led_report_data[0] = 0;
+    if (s_num_lock)    s_led_report_data[0] |= (1 << 0); // Bit 0: Num Lock LED
+    if (s_caps_lock)   s_led_report_data[0] |= (1 << 1); // Bit 1: Caps Lock LED
+    if (s_scroll_lock) s_led_report_data[0] |= (1 << 2); // Bit 2: Scroll Lock LED
 
-    hid_class_request_set_report(s_kb_dev_handle,
-                                 HID_REPORT_TYPE_OUTPUT,
-                                 0,
-                                 &leds,
-                                 1);
+    esp_err_t err = hid_class_request_set_report(s_kb_dev_handle,
+                                                 HID_REPORT_TYPE_OUTPUT,
+                                                 0,
+                                                 s_led_report_data,
+                                                 1);
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "Set LED report: 0x%x", err);
+    }
 }
 
 static void print_key_combo(uint8_t mod, uint8_t kc)
@@ -438,7 +453,7 @@ static void key_event_callback(key_event_t *key_event)
     }
     if (kc == 0x39) { // CapsLock
         s_caps_lock = !s_caps_lock;
-        update_keyboard_leds();
+        trigger_led_update();
         return;
     }
 
@@ -454,7 +469,7 @@ static void key_event_callback(key_event_t *key_event)
         case 0x46: printf("[PRTSC]"); fflush(stdout); return;
         case 0x47: 
             s_scroll_lock = !s_scroll_lock;
-            update_keyboard_leds();
+            trigger_led_update();
             printf("[SCRLK]"); 
             fflush(stdout); 
             return;
@@ -471,7 +486,7 @@ static void key_event_callback(key_event_t *key_event)
         case 0x52: printf("[UP]"); fflush(stdout); return;
         case 0x53: // NumLock
             s_num_lock = !s_num_lock;
-            update_keyboard_leds();
+            trigger_led_update();
             return;
         default:
             break;
@@ -732,7 +747,7 @@ void hid_host_device_event(hid_host_device_handle_t hid_device_handle,
             }
             ESP_ERROR_CHECK(hid_host_device_start(hid_device_handle));
             if (HID_PROTOCOL_KEYBOARD == dev_params.proto) {
-                update_keyboard_leds();
+                trigger_led_update();
             }
         }
         break;
@@ -838,6 +853,8 @@ void app_main(void)
                 hid_host_device_event(evt_queue.hid_host_device.handle,
                                       evt_queue.hid_host_device.event,
                                       evt_queue.hid_host_device.arg);
+            } else if (APP_EVENT_UPDATE_LEDS == evt_queue.event_group) {
+                update_keyboard_leds();
             }
         }
     }
