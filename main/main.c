@@ -22,25 +22,12 @@
 #include "usb/hid_usage_keyboard.h"
 #include "usb/hid_usage_mouse.h"
 
-/* GPIO Pin number for quit from example logic */
-#define APP_QUIT_PIN                GPIO_NUM_0
-
-static const char *TAG = "example";
+static const char *TAG = "usb_host";
 
 QueueHandle_t app_event_queue = NULL;
 
-/**
- * @brief APP event group
- *
- * Application logic can be different. There is a one among other ways to distinguish the
- * event by application event group.
- * In this example we have two event groups:
- * APP_EVENT            - General event, which is APP_QUIT_PIN press event (Generally, it is IO0).
- * APP_EVENT_HID_HOST   - HID Host Driver event, such as device connection/disconnection or input report.
- */
 typedef enum {
-    APP_EVENT = 0,
-    APP_EVENT_HID_HOST
+    APP_EVENT_HID_HOST = 0
 } app_event_group_t;
 
 /**
@@ -660,41 +647,6 @@ static void usb_lib_task(void *arg)
     while (true) {
         uint32_t event_flags;
         usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
-        // In this example, there is only one client registered
-        // So, once we deregister the client, this call must succeed with ESP_OK
-        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
-            ESP_ERROR_CHECK(usb_host_device_free_all());
-            break;
-        }
-    }
-
-    ESP_LOGI(TAG, "USB shutdown");
-    // Clean up USB Host
-    vTaskDelay(10); // Short delay to allow clients clean-up
-    ESP_ERROR_CHECK(usb_host_uninstall());
-    vTaskDelete(NULL);
-}
-
-/**
- * @brief BOOT button pressed callback
- *
- * Signal application to exit the HID Host task
- *
- * @param[in] arg Unused
- */
-static void gpio_isr_cb(void *arg)
-{
-    BaseType_t xTaskWoken = pdFALSE;
-    const app_event_queue_t evt_queue = {
-        .event_group = APP_EVENT,
-    };
-
-    if (app_event_queue) {
-        xQueueSendFromISR(app_event_queue, &evt_queue, &xTaskWoken);
-    }
-
-    if (xTaskWoken == pdTRUE) {
-        portYIELD_FROM_ISR();
     }
 }
 
@@ -728,24 +680,15 @@ void app_main(void)
 {
     BaseType_t task_created;
     app_event_queue_t evt_queue;
-    ESP_LOGI(TAG, "HID Host example");
+    ESP_LOGI(TAG, "HID Host service starting...");
 
-    // Init BOOT button: Pressing the button simulates app request to exit
-    // It will disconnect the USB device and uninstall the HID driver and USB Host Lib
-    const gpio_config_t input_pin = {
-        .pin_bit_mask = BIT64(APP_QUIT_PIN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&input_pin));
-    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LOWMED));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(APP_QUIT_PIN, gpio_isr_cb, NULL));
+    // Create queue
+    app_event_queue = xQueueCreate(20, sizeof(app_event_queue_t));
 
     /*
     * Create usb_lib_task to:
     * - initialize USB Host library
-    * - Handle USB Host events while APP pin in in HIGH state
+    * - Handle USB Host events continuously
     */
     task_created = xTaskCreatePinnedToCore(usb_lib_task,
                                            "usb_events",
@@ -773,39 +716,18 @@ void app_main(void)
 
     ESP_ERROR_CHECK(hid_host_install(&hid_host_driver_config));
 
-    // Create queue
-    app_event_queue = xQueueCreate(10, sizeof(app_event_queue_t));
-
-    ESP_LOGI(TAG, "Waiting for HID Device to be connected");
+    ESP_LOGI(TAG, "==================================================");
+    ESP_LOGI(TAG, "USB HOST READY! Hay cam ban phim USB vao cong USB");
+    ESP_LOGI(TAG, "==================================================");
 
     while (1) {
-        // Wait queue
         if (xQueueReceive(app_event_queue, &evt_queue, portMAX_DELAY)) {
-            if (APP_EVENT == evt_queue.event_group) {
-                // User pressed button
-                usb_host_lib_info_t lib_info;
-                ESP_ERROR_CHECK(usb_host_lib_info(&lib_info));
-                if (lib_info.num_devices == 0) {
-                    // End while cycle
-                    break;
-                } else {
-                    ESP_LOGW(TAG, "To shutdown example, remove all USB devices and press button again.");
-                    // Keep polling
-                }
-            }
-
-            if (APP_EVENT_HID_HOST ==  evt_queue.event_group) {
+            if (APP_EVENT_HID_HOST == evt_queue.event_group) {
                 hid_host_device_event(evt_queue.hid_host_device.handle,
                                       evt_queue.hid_host_device.event,
                                       evt_queue.hid_host_device.arg);
             }
         }
     }
-
-    ESP_LOGI(TAG, "HID Driver uninstall");
-    ESP_ERROR_CHECK(hid_host_uninstall());
-    gpio_isr_handler_remove(APP_QUIT_PIN);
-    xQueueReset(app_event_queue);
-    vQueueDelete(app_event_queue);
 }
 
