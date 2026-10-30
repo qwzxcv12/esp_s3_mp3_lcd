@@ -136,6 +136,7 @@ typedef enum {
     MODE_6_CARTOON_SFX,
     MODE_7_SECRET_AGENT_ROBOT,
     MODE_8_COCKPIT_ANIMALS,
+    MODE_9_LEARN_PHONICS_NUMBERS,
     MODE_MAX_COUNT
 } toy_mode_t;
 
@@ -147,7 +148,8 @@ static const char *s_mode_names[MODE_MAX_COUNT] = {
     "5. MÁY GÕ CHỮ CỔ ĐIỂN",
     "6. HỘP ÂM THANH GAME & HOẠT HÌNH",
     "7. ĐIỆP VIÊN NHÍ & ROBOT R2-D2",
-    "8. BUỒNG LÁI XE CỨU HỎA & 26 CON VẬT"
+    "8. BUỒNG LÁI XE CỨU HỎA & 26 CON VẬT",
+    "9. BÉ HỌC ĐÁNH VẦN CHỮ CÁI & TẬP ĐẾM SỐ (PHONICS & COUNTING)"
 };
 
 static toy_mode_t s_current_mode = MODE_1_PIANO;
@@ -215,7 +217,7 @@ static void handle_toy_mode_key(uint8_t kc, uint8_t mod, char c) {
         switch_toy_mode((toy_mode_t)((s_current_mode + 1) % MODE_MAX_COUNT));
         return;
     }
-    if (kc >= 0x3A && kc <= 0x41) { // F1 - F8: Direct jump
+    if (kc >= 0x3A && kc <= 0x42) { // F1 - F9: Direct jump to Modes 1 - 9
         switch_toy_mode((toy_mode_t)(kc - 0x3A));
         return;
     }
@@ -567,6 +569,85 @@ static void handle_toy_mode_key(uint8_t kc, uint8_t mod, char c) {
             } else {
                 audio_play_cartoon_sfx(SFX_LASER);
                 printf(" -> [BUỒNG LÁI: BẬT NÚT ĐẶC CHỦNG!]\r\n");
+            }
+            fflush(stdout);
+            break;
+        }
+
+        // =====================================================
+        // MODE 9: BÉ HỌC ĐÁNH VẦN CHỮ CÁI & TẬP ĐẾM SỐ (PHONICS & COUNTING)
+        // =====================================================
+        case MODE_9_LEARN_PHONICS_NUMBERS: {
+            if (upper >= 'A' && upper <= 'Z') {
+                audio_play_phonics_letter(upper);
+                // Unique bright color burst for each letter group
+                uint8_t r = 50 + ((upper * 37) % 205);
+                uint8_t g = 50 + ((upper * 67) % 205);
+                uint8_t b = 50 + ((upper * 97) % 205);
+                led_effects_color_burst(r, g, b);
+
+                const char *spell_text = "CHỮ CÁI";
+                switch (upper) {
+                    case 'A': spell_text = "Chữ A -> A... Quả Táo / Con Gà!"; break;
+                    case 'B': spell_text = "Chữ B (Bờ) -> Quả Bóng / Con Bò!"; break;
+                    case 'C': spell_text = "Chữ C (Cờ) -> Con Cá / Cái Cốc!"; break;
+                    case 'D': spell_text = "Chữ D (Dờ) -> Con Dê / Quả Dưa Hấu!"; break;
+                    case 'E': spell_text = "Chữ E (E) -> Em Bé / Quả Me!"; break;
+                    case 'F': spell_text = "Chữ F (Ép) -> Pháo Hoa Rực Rỡ!"; break;
+                    case 'G': spell_text = "Chữ G (Gờ) -> Con Gà Trống / Cái Ghế!"; break;
+                    case 'H': spell_text = "Chữ H (Hờ) -> Bông Hoa Đẹp / Con Hổ!"; break;
+                    case 'I': spell_text = "Chữ I (I) -> Viên Bi Tròn / Trái Mận!"; break;
+                    case 'J': spell_text = "Chữ J (Gi) -> Chiếc Hộp Nhạc Vui Nhộn!"; break;
+                    case 'K': spell_text = "Chữ K (Ca) -> Cây Kem Mát Lạnh / Cái Kéo!"; break;
+                    case 'L': spell_text = "Chữ L (Lờ) -> Chiếc Lá Xanh / Con Lợn Ỉn!"; break;
+                    case 'M': spell_text = "Chữ M (Mờ) -> Mặt Trời Chiếu Sáng / Con Mèo Con!"; break;
+                    case 'N': spell_text = "Chữ N (Nờ) -> Ngôi Sao Sáng / Quả Na!"; break;
+                    case 'O': spell_text = "Chữ O (O) -> Quả Trứng Gà Tròn Xoe / Con Ong!"; break;
+                    case 'P': spell_text = "Chữ P (Pờ) -> Cây Cầu Vồng / Đèn Pin Sáng!"; break;
+                    case 'Q': spell_text = "Chữ Q (Quy) -> Con Quạ Đen / Cây Quạt Mát!"; break;
+                    case 'R': spell_text = "Chữ R (Rờ) -> Con Rùa Chậm Chạp / Rừng Cây!"; break;
+                    case 'S': spell_text = "Chữ S (Sờ) -> Chú Sóc Nâu Nhặt Hạt / Dòng Sông!"; break;
+                    case 'T': spell_text = "Chữ T (Tờ) -> Đoàn Tàu Hỏa Xình Xịch / Con Tôm!"; break;
+                    case 'U': spell_text = "Chữ U (U) -> Đám Mây Trắng / Cầu Vồng 7 Màu!"; break;
+                    case 'V': spell_text = "Chữ V (Vờ) -> Chú Voi Con Vẫy Vòi / Con Vịt Vàng!"; break;
+                    case 'W': spell_text = "Chữ W (Vê-Kép) -> Thế Giới Kỳ Thú / Bánh Xe!"; break;
+                    case 'X': spell_text = "Chữ X (Xờ) -> Chiếc Xe Ô Tô Chạy Nhanh / Quả Xoài Ngọt!"; break;
+                    case 'Y': spell_text = "Chữ Y (I-Dài) -> Yêu Thương Bố Mẹ / Cây Tre Xanh!"; break;
+                    case 'Z': spell_text = "Chữ Z (Dét) -> Chú Ngựa Vằn Zebra / Đám Mây Sấm Sét!"; break;
+                    default: spell_text = "Bé học đánh vần chữ cái vui nhộn!"; break;
+                }
+                printf(" -> [BÉ HỌC ĐÁNH VẦN: %s]\r\n", spell_text);
+            } else if ((c >= '1' && c <= '9') || c == '0' || (kc >= 0x59 && kc <= 0x62)) {
+                uint8_t num = 0;
+                if (c >= '1' && c <= '9') num = c - '0';
+                else if (c == '0') num = 10;
+                else if (kc >= 0x59 && kc <= 0x61) num = kc - 0x59 + 1; // Numpad 1..9
+                else if (kc == 0x62) num = 10; // Numpad 0 = 10
+
+                printf(" -> [BÉ HỌC ĐẾM: SỐ %d -> %d TIẾNG TRỐNG TÙNG! + %d ĐÈN SÁNG]\r\n", 
+                       (num == 10) ? 10 : num, num, num);
+                fflush(stdout);
+                audio_play_counting_number(num);
+            } else if (c == '\r' || c == '\n' || kc == 0x58) {
+                audio_play_cartoon_sfx(SFX_VICTORY_FANFARE);
+                led_effects_color_burst(255, 215, 0);
+                printf(" -> [BÉ HOÀN THÀNH BÀI HỌC: HOAN HÔ BÉ GIỎI QUÁ! BÉ VỖ TAY NÀO!]\r\n");
+            } else if (c == ' ') {
+                audio_play_cartoon_sfx(SFX_BOING);
+                led_effects_color_burst(0, 255, 200);
+                printf(" -> [BÉ VẬN ĐỘNG: NHẢY LÊN NÀO! BOING BOING!]\r\n");
+            } else if (c == '\b' || kc == 0x4C) { // Backspace or DEL
+                audio_play_typewriter_sfx(3);
+                led_effects_clear();
+                printf(" -> [BÉ XÓA BẢNG ĐỂ VIẾT VÀ ĐẾM LẠI TỪ ĐẦU!]\r\n");
+            } else if (kc >= 0x4F && kc <= 0x52) { // Arrow keys
+                audio_play_cartoon_sfx(SFX_WATER_DROP);
+                led_effects_beat();
+                printf(" -> [BÉ CHỈ ĐƯỜNG: BƯỚC ĐI TỪNG BƯỚC! TONG TONG!]\r\n");
+            } else {
+                audio_play_piano_note(523.25f, TIMBRE_MUSIC_BOX);
+                led_effects_beat();
+                printf(" -> [BÉ BẤM NÚT KỲ DIỆU: KENG KENG!]\r\n");
             }
             fflush(stdout);
             break;

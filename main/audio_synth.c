@@ -1,4 +1,5 @@
 #include "audio_synth.h"
+#include "led_effects.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -612,3 +613,54 @@ void audio_play_animal_sound(char key) {
             break;
     }
 }
+
+// Mode 9: Phonics & Counting Learning
+void audio_play_counting_number(uint8_t num) {
+    if (num == 0) num = 10;
+    if (num > 10) num = 10;
+
+    // Harmonized bell note announcing the number
+    trigger_voice_internal(VOICE_TONE_ADSR, 261.63f + num * 32.0f, 0, 0, 0.9f, 220, TIMBRE_PIANO);
+    trigger_voice_internal(VOICE_TONE_ADSR, (261.63f + num * 32.0f) * 1.5f, 0, 0, 0.5f, 220, TIMBRE_MUSIC_BOX);
+
+    // Punchy rhythmic drum beat pulses for counting with synchronized LED count
+    for (uint8_t i = 0; i < num; i++) {
+        led_effects_count(i + 1, 255, 180, 0);
+        trigger_voice_internal(VOICE_PITCH_SWEEP, 0, 180.0f, 50.0f, 0.95f, 120, 0);
+        if (i < num - 1) {
+            vTaskDelay(pdMS_TO_TICKS(160));
+        }
+    }
+}
+
+void audio_play_phonics_letter(char c) {
+    if (c >= 'a' && c <= 'z') c -= 32;
+
+    float f1 = 600.0f;
+    float f2 = 1200.0f;
+
+    switch (c) {
+        case 'A': f1 = 800.0f; f2 = 1250.0f; break; // "A"
+        case 'E': f1 = 530.0f; f2 = 1840.0f; break; // "E"
+        case 'I': f1 = 270.0f; f2 = 2290.0f; break; // "I"
+        case 'O': f1 = 510.0f; f2 = 840.0f;  break; // "O"
+        case 'U': f1 = 300.0f; f2 = 870.0f;  break; // "U"
+        case 'B': f1 = 300.0f; f2 = 1100.0f; break; // "Bờ"
+        case 'C': f1 = 400.0f; f2 = 1400.0f; break; // "Cờ"
+        case 'D': f1 = 350.0f; f2 = 1600.0f; break; // "Dờ"
+        case 'G': f1 = 380.0f; f2 = 1300.0f; break; // "Gờ"
+        case 'M': f1 = 280.0f; f2 = 1000.0f; break; // "Mờ"
+        case 'N': f1 = 320.0f; f2 = 1450.0f; break; // "Nờ"
+        case 'P': f1 = 340.0f; f2 = 1200.0f; break; // "Pờ"
+        case 'T': f1 = 400.0f; f2 = 1700.0f; break; // "Tờ"
+        case 'V': f1 = 320.0f; f2 = 1500.0f; break; // "Vờ"
+        default:  f1 = 400.0f + (c % 7) * 60.0f; f2 = 1100.0f + (c % 9) * 80.0f; break;
+    }
+
+    // Double formant vocal tract filter
+    trigger_voice_internal(VOICE_TONE_ADSR, f1, 0, 0, 0.75f, 220, TIMBRE_PIANO);
+    trigger_voice_internal(VOICE_TONE_ADSR, f2, 0, 0, 0.45f, 220, TIMBRE_PIANO);
+    // Plosive attack
+    trigger_voice_internal(VOICE_NOISE_BURST, 0, 0, 0, 0.4f, 30, 0);
+}
+

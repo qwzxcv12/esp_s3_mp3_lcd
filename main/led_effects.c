@@ -81,7 +81,7 @@ void led_effects_mode_switch(uint8_t mode_index) {
     if (!s_led_strip || !s_led_mutex) return;
     xSemaphoreTake(s_led_mutex, portMAX_DELAY);
 
-    uint16_t base_hue = (mode_index * 45) % 360;
+    uint16_t base_hue = (mode_index * 40) % 360;
     for (int step = 0; step < LED_STRIP_COUNT + 5; step++) {
         for (int i = 0; i < LED_STRIP_COUNT; i++) {
             if (i <= step && (step - i) < 6) {
@@ -204,3 +204,19 @@ void led_effects_idle_step(void) {
     led_strip_refresh(s_led_strip);
     xSemaphoreGive(s_led_mutex);
 }
+
+// Light up exactly N LEDs for counting
+void led_effects_count(uint8_t count, uint8_t r, uint8_t g, uint8_t b) {
+    if (!s_led_strip || !s_led_mutex) return;
+    xSemaphoreTake(s_led_mutex, portMAX_DELAY);
+
+    led_strip_clear(s_led_strip);
+    if (count > LED_STRIP_COUNT) count = LED_STRIP_COUNT;
+
+    for (int i = 0; i < count; i++) {
+        led_strip_set_pixel(s_led_strip, i, r, g, b);
+    }
+    led_strip_refresh(s_led_strip);
+    xSemaphoreGive(s_led_mutex);
+}
+
