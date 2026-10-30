@@ -312,6 +312,25 @@ static inline bool hid_keyboard_get_char(uint8_t modifier,
 
 static bool s_caps_lock = false;
 static bool s_num_lock = true;
+static bool s_scroll_lock = false;
+static hid_host_device_handle_t s_kb_dev_handle = NULL;
+
+static void update_keyboard_leds(void)
+{
+    if (s_kb_dev_handle == NULL) {
+        return;
+    }
+    uint8_t leds = 0;
+    if (s_num_lock)   leds |= (1 << 0); // Bit 0: Num Lock LED
+    if (s_caps_lock)  leds |= (1 << 1); // Bit 1: Caps Lock LED
+    if (s_scroll_lock) leds |= (1 << 2); // Bit 2: Scroll Lock LED
+
+    hid_class_request_set_report(s_kb_dev_handle,
+                                 HID_REPORT_TYPE_OUTPUT,
+                                 0,
+                                 &leds,
+                                 1);
+}
 
 static void print_key_combo(uint8_t mod, uint8_t kc)
 {
@@ -419,6 +438,7 @@ static void key_event_callback(key_event_t *key_event)
     }
     if (kc == 0x39) { // CapsLock
         s_caps_lock = !s_caps_lock;
+        update_keyboard_leds();
         return;
     }
 
@@ -432,7 +452,12 @@ static void key_event_callback(key_event_t *key_event)
     // 5. Navigation & Editing keys
     switch (kc) {
         case 0x46: printf("[PRTSC]"); fflush(stdout); return;
-        case 0x47: printf("[SCRLK]"); fflush(stdout); return;
+        case 0x47: 
+            s_scroll_lock = !s_scroll_lock;
+            update_keyboard_leds();
+            printf("[SCRLK]"); 
+            fflush(stdout); 
+            return;
         case 0x48: printf("[PAUSE]"); fflush(stdout); return;
         case 0x49: printf("[INS]"); fflush(stdout); return;
         case 0x4A: printf("[HOME]"); fflush(stdout); return;
@@ -446,6 +471,7 @@ static void key_event_callback(key_event_t *key_event)
         case 0x52: printf("[UP]"); fflush(stdout); return;
         case 0x53: // NumLock
             s_num_lock = !s_num_lock;
+            update_keyboard_leds();
             return;
         default:
             break;
@@ -654,6 +680,9 @@ void hid_host_interface_callback(hid_host_device_handle_t hid_device_handle,
     case HID_HOST_INTERFACE_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "HID Device, protocol '%s' DISCONNECTED",
                  hid_proto_name_str[dev_params.proto]);
+        if (s_kb_dev_handle == hid_device_handle) {
+            s_kb_dev_handle = NULL;
+        }
         ESP_ERROR_CHECK(hid_host_device_close(hid_device_handle));
         break;
     case HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR:
@@ -698,9 +727,13 @@ void hid_host_device_event(hid_host_device_handle_t hid_device_handle,
                 ESP_ERROR_CHECK(hid_class_request_set_protocol(hid_device_handle, HID_REPORT_PROTOCOL_BOOT));
                 if (HID_PROTOCOL_KEYBOARD == dev_params.proto) {
                     ESP_ERROR_CHECK(hid_class_request_set_idle(hid_device_handle, 0, 0));
+                    s_kb_dev_handle = hid_device_handle;
                 }
             }
             ESP_ERROR_CHECK(hid_host_device_start(hid_device_handle));
+            if (HID_PROTOCOL_KEYBOARD == dev_params.proto) {
+                update_keyboard_leds();
+            }
         }
         break;
     default:
