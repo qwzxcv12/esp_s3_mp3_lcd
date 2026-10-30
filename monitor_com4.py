@@ -2,39 +2,43 @@ import sys
 import time
 import serial
 
+# Configure utf-8 stdout on Windows
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 PORT = "COM4"
 BAUD = 115200
-DURATION = 90  # 90 seconds
 
-print(f"=== [MONITOR] Mo cong {PORT} (115200) trong 90 giay... ===", flush=True)
+print("=" * 60, flush=True)
+print(f"   THEO DÕI REALTIME BÀN PHÍM ESP32-S3 TRÊN {PORT} ({BAUD})", flush=True)
+print("   (Bấm phím trên bàn phím USB để xem log, bấm Ctrl+C để dừng)", flush=True)
+print("=" * 60, flush=True)
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=0.1)
+    ser.setDTR(False)
+    ser.setRTS(False)
 except Exception as e:
-    print(f"[ERROR] Khong mo duoc cong {PORT}: {e}", flush=True)
+    print(f"[ERROR] Không thể mở cổng {PORT}: {e}", flush=True)
     sys.exit(1)
 
-print("=== [SAN SANG] Hay RUT RA VA CAM LAI ban phim, roi go Ctrl, Alt, Win, Shift, Ctrl+C, Win+R... ===", flush=True)
+print("\n>>> ĐANG LẮNG NGHE... Hãy bấm phím, phím ESC để đổi chế độ!\n", flush=True)
 
-start_time = time.time()
-buffer = ""
-
-while (time.time() - start_time) < DURATION:
-    try:
+try:
+    while True:
         data = ser.read(ser.in_waiting or 1)
         if data:
-            decoded = data.decode("utf-8", errors="replace")
-            sys.stdout.write(decoded)
-            sys.stdout.flush()
-            buffer += decoded
-    except Exception as e:
-        print(f"\n[ERROR] Doc serial loi: {e}", flush=True)
-        break
-    time.sleep(0.01)
-
-ser.close()
-print("\n\n=== [KET THUC PHIEN THEO DOI 90S] ===", flush=True)
-if buffer.strip():
-    print(f"\n>>> NOI DUNG NHAN DUOC:\n{buffer}\n", flush=True)
-else:
-    print("\n>>> Chua nhan duoc du lieu.", flush=True)
+            try:
+                decoded = data.decode("utf-8", errors="replace")
+                sys.stdout.write(decoded)
+                sys.stdout.flush()
+            except Exception:
+                pass
+        time.sleep(0.005)
+except KeyboardInterrupt:
+    print("\n\n=== ĐÃ DỪNG THEO DÕI ===", flush=True)
+finally:
+    ser.close()
