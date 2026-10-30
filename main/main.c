@@ -313,6 +313,47 @@ static inline bool hid_keyboard_get_char(uint8_t modifier,
 static bool s_caps_lock = false;
 static bool s_num_lock = true;
 
+static void print_key_combo(uint8_t mod, uint8_t kc)
+{
+    printf("[");
+    if (mod & 0x11) printf("CTRL+");
+    if (mod & 0x44) printf("ALT+");
+    if (mod & 0x88) printf("WIN+");
+    if (mod & 0x22) printf("SHIFT+");
+
+    if (kc >= 0x04 && kc <= 0x1D) {
+        putchar('A' + (kc - 0x04));
+    } else if (kc >= 0x1E && kc <= 0x27) {
+        putchar((kc == 0x27) ? '0' : ('1' + (kc - 0x1E)));
+    } else if (kc >= 0x3A && kc <= 0x45) {
+        printf("F%d", (kc - 0x3A + 1));
+    } else if (kc == 0x28) {
+        printf("ENTER");
+    } else if (kc == 0x29) {
+        printf("ESC");
+    } else if (kc == 0x2A) {
+        printf("BACKSPACE");
+    } else if (kc == 0x2B) {
+        printf("TAB");
+    } else if (kc == 0x2C) {
+        printf("SPACE");
+    } else if (kc == 0x4C) {
+        printf("DEL");
+    } else if (kc == 0x4F) {
+        printf("RIGHT");
+    } else if (kc == 0x50) {
+        printf("LEFT");
+    } else if (kc == 0x51) {
+        printf("DOWN");
+    } else if (kc == 0x52) {
+        printf("UP");
+    } else {
+        printf("KEY_0x%02X", kc);
+    }
+    printf("]");
+    fflush(stdout);
+}
+
 /**
  * @brief Key Event. Key event with the key code, state and modifier.
  *
@@ -330,6 +371,16 @@ static void key_event_callback(key_event_t *key_event)
     uint8_t kc = key_event->key_code;
     uint8_t mod = key_event->modifier;
     bool is_shift = hid_keyboard_is_modifier_shift(mod);
+
+    // Neu dang giu Ctrl, Alt, hoac Win -> In to hop phim (vi du [CTRL+C], [ALT+F4], [WIN+R])
+    bool has_ctrl = (mod & 0x11) != 0;
+    bool has_alt  = (mod & 0x44) != 0;
+    bool has_gui  = (mod & 0x88) != 0;
+
+    if (has_ctrl || has_alt || has_gui) {
+        print_key_combo(mod, kc);
+        return;
+    }
 
     // 1. Letters: 'a' - 'z' (0x04 - 0x1D)
     if (kc >= 0x04 && kc <= 0x1D) {
@@ -459,7 +510,35 @@ static void hid_host_keyboard_report_callback(const uint8_t *const data, const i
     }
 
     static uint8_t prev_keys[HID_KEYBOARD_KEY_MAX] = { 0 };
+    static uint8_t prev_modifier = 0;
     key_event_t key_event;
+
+    uint8_t curr_modifier = kb_report->modifier.val;
+    uint8_t pressed_mods = curr_modifier & (~prev_modifier);
+
+    bool any_key_pressed = false;
+    for (int i = 0; i < HID_KEYBOARD_KEY_MAX; i++) {
+        if (kb_report->key[i] > HID_KEY_ERROR_UNDEFINED) {
+            any_key_pressed = true;
+            break;
+        }
+    }
+
+    // In cac phim chuc nang khi duoc bam rieng le (Ctrl, Shift, Alt, Win)
+    if (pressed_mods && !any_key_pressed) {
+        hid_print_new_device_report_header(HID_PROTOCOL_KEYBOARD);
+        if (pressed_mods & 0x01) printf("[LCTRL]");
+        if (pressed_mods & 0x02) printf("[LSHIFT]");
+        if (pressed_mods & 0x04) printf("[LALT]");
+        if (pressed_mods & 0x08) printf("[WIN]");
+        if (pressed_mods & 0x10) printf("[RCTRL]");
+        if (pressed_mods & 0x20) printf("[RSHIFT]");
+        if (pressed_mods & 0x40) printf("[RALT]");
+        if (pressed_mods & 0x80) printf("[RWIN]");
+        fflush(stdout);
+    }
+
+    prev_modifier = curr_modifier;
 
 #if KEYBOARD_ENTER_ALT_ESCAPE
     if (!hid_keyboard_is_modifier_alt(kb_report->modifier.val)) {
