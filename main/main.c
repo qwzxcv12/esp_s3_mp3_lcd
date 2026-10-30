@@ -633,11 +633,11 @@ static void handle_toy_mode_key(uint8_t kc, uint8_t mod, char c) {
                 led_effects_color_burst(255, 215, 0);
                 printf(" -> [BÉ HOÀN THÀNH BÀI HỌC: HOAN HÔ BÉ GIỎI QUÁ! BÉ VỖ TAY NÀO!]\r\n");
             } else if (c == ' ') {
-                audio_play_cartoon_sfx(SFX_BOING);
+                audio_play_cartoon_sfx(SFX_SPRING_BOING);
                 led_effects_color_burst(0, 255, 200);
                 printf(" -> [BÉ VẬN ĐỘNG: NHẢY LÊN NÀO! BOING BOING!]\r\n");
             } else if (c == '\b' || kc == 0x4C) { // Backspace or DEL
-                audio_play_typewriter_sfx(3);
+                audio_play_typewriter(TYPEWRITER_BACKSPACE);
                 led_effects_clear();
                 printf(" -> [BÉ XÓA BẢNG ĐỂ VIẾT VÀ ĐẾM LẠI TỪ ĐẦU!]\r\n");
             } else if (kc >= 0x4F && kc <= 0x52) { // Arrow keys
